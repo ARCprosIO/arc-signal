@@ -485,7 +485,7 @@ public class NetScanPlugin extends Plugin {
                                         JSObject d = new JSObject(); d.put("ip", ip); d.put("rtt", rtt); d.put("ports", open);
                                         if (ip.equals(self)) d.put("name", "This phone");
                                         else {
-                                            Future<String> f = dnsEx.submit(new java.util.concurrent.Callable<String>() { public String call() { return InetAddress.getByName(ip).getCanonicalHostName(); } });
+                                            Future<String> f = dnsEx.submit(new java.util.concurrent.Callable<String>() { public String call()throws Exception { return InetAddress.getByName(ip).getCanonicalHostName(); } });
                                             try { String n = f.get(1200, TimeUnit.MILLISECONDS); if (n != null && !n.equals(ip)) d.put("name", n.replaceAll("\\.(lan|local|home|localdomain)$", "")); } catch (Exception ignored) { f.cancel(true); }
                                         }
                                         if (upnp.containsKey(ip)) d.put("banner", upnp.get(ip));
