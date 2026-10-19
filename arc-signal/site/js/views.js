@@ -38,7 +38,8 @@
   };
 
   /* ================= WI-FI ================= */
-  const SUBHINT = { overview: 'Summary: health score, crowding and problems found.', bands: 'Which channels each network uses. Tall = strong. Overlapping shapes = crowding.', mesh: 'Networks made of several routers or nodes, and whether they work well together.', radar: 'Rough distance to each network. Closer to the middle = stronger.', rogue: 'Fake, look-alike or suspicious networks.', list: 'Every network in one table.' };
+  const cl01 = v => Math.max(0, Math.min(1, v));
+  const SUBHINT = { overview: 'Summary: health score, crowding and problems found.', bands: 'Which channels each network uses. Tall = strong. Overlapping shapes = crowding.', mesh: 'Networks made of several routers or nodes, and whether they work well together.', radar: 'Rough distance to each network. Tap one, then Track only this, and walk toward it.', rogue: 'Fake, look-alike or suspicious networks.', list: 'Every network in one table.' };
   A.views.wifi = function (root, arg) {
     const web = !N.live;
     if (web) root.append(A.connBar());
@@ -76,7 +77,7 @@
 
     async function doScan() {
       scanBtn.disabled = true; scanBtn.textContent = 'Scanning...'; status.textContent = '';
-      try { await A.scan(); } catch (e) { body.replaceChildren(h('div', { class: 'card bad' }, 'Scan failed: ' + (e.message || e))); }
+      try { await A.scan(); } catch (e) { body.replaceChildren(A.scanProblem(e, () => render())); }
       scanBtn.disabled = false; scanBtn.textContent = 'Scan again'; render();
     }
     scanBtn.onclick = web ? () => A.importSheet(() => { drawCur(); render(); }) : doScan;
@@ -109,7 +110,15 @@
           A.card(`Findings (${(A.ctx.findings || []).length})`, (A.ctx.findings || []).length ? A.ctx.findings.map(A.finding) : h('div', { class: 'good', style: 'font-weight:600' }, 'No Wi-Fi problems found in this scan.')),
           A.card('Tap a network to analyze it', listChips(nets)), web ? null : traceCard());
       } else if (sub === 'bands') {
-        body.replaceChildren(bandMapCard('2.4 GHz', '2.4 GHz channels'), bandMapCard('5 GHz', '5 GHz channels'), bandMapCard('6 GHz', '6 GHz channels (Wi-Fi 6E / 7)'),
+        const onCard = (() => { const wf = A.ctx.wifi, ssid = (wf && wf.ssid) || (me && me.ssid); if (!ssid) return A.card('You are on', h('div', { class: 'small mute' }, web ? 'Pick which network is yours on the Overview tab and it will show here.' : 'Not connected to Wi-Fi right now.'));
+          const fq = wf && wf.frequency, band = fq ? C.bandOf(fq) : me && me.band, ch = fq ? C.channelOf(fq) : me && me.channel, rs = wf && wf.rssi != null ? wf.rssi : me && me.level, r = rs != null ? C.rssiInfo(rs) : null;
+          const same = nets.filter(n => n.band === band && n.channel === ch && n.bssid !== (wf && wf.bssid || mine)).length, onBand = nets.filter(n => n.band === band).length;
+          const tip = band === '2.4 GHz' ? 'Longest range but slowest and most crowded. Best for far rooms and smart-home gear.' : band === '5 GHz' ? 'The sweet spot: fast, and less crowded than 2.4. Range drops through walls.' : band === '6 GHz' ? 'Fastest and cleanest, but shortest range. Needs a Wi-Fi 6E or 7 device.' : '';
+          return A.card('You are on', h('div', { class: 'row sp' }, h('div', {}, h('div', { class: 'head', style: 'font-weight:800;font-size:22px' }, band || '?'), h('div', { class: 'small mute' }, ssid)), r ? h('div', { style: 'text-align:right' }, h('div', { class: 'head ' + r.tone, style: 'font-weight:800;font-size:22px' }, rs + ' dBm'), h('div', { class: 'small ' + r.tone }, r.label)) : null),
+            h('div', { class: 'grid', style: 'margin-top:10px' }, [['Channel', ch || '-'], ['Width', wf && wf.width ? wf.width + ' MHz' : '-'], ['Standard', (wf && wf.standard) || '-'], ['Link speed', wf && wf.linkSpeed ? wf.linkSpeed + ' Mbps' : '-'], ['Same channel', same + ' other'], ['On this band', onBand + ' networks']].map(([l, v]) => A.st(v, l))),
+            tip ? h('div', { class: 'small', style: 'margin-top:10px' }, tip) : null, same >= 3 ? h('div', { class: 'small warn', style: 'margin-top:6px' }, `${same} other radios share your channel. That slows everyone down; see the graph below for a quieter one.`) : null);
+        })();
+        body.replaceChildren(onCard, bandMapCard('2.4 GHz', '2.4 GHz channels'), bandMapCard('5 GHz', '5 GHz channels'), bandMapCard('6 GHz', '6 GHz channels (Wi-Fi 6E / 7)'),
           h('div', { class: 'small mute' }, 'Each colour is one network name. Taller = stronger signal at your phone. Width shows channel width. Tap any shape to open that network.'));
       } else if (sub === 'mesh') {
         const groups = {}; nets.forEach(n => { (groups[n.ssid] = groups[n.ssid] || []).push(n); });
@@ -119,7 +128,20 @@
       } else if (sub === 'radar') {
         const cv = h('canvas', { style: 'height:340px' }), sel = h('div', { class: 'small mute' }, 'Tap a blip to select it. Closer to the centre = stronger signal.');
         body.replaceChildren(A.card('Radar locator', cv, h('div', { class: 'xs mute', style: 'margin-top:6px' }, 'Distance is estimated from signal strength. Direction is not measured by a phone, so the angle is just a stable position for each device. Use Hunt mode to actually find one: walk around and watch the number climb.'), sel), A.card('Legend', h('div', { class: 'legend' }, h('div', { class: 'li' }, h('i', { style: 'background:var(--tx);border-radius:50%' }), 'Plain = 2.4 GHz'), h('div', { class: 'li' }, h('i', { style: 'border:2px solid var(--tx);border-radius:50%' }), 'Ring = 5 / 6 GHz'), h('div', { class: 'li' }, 'Bigger = stronger')), listChips(nets)));
-        stopRadar(); radar = Ch.radar(cv, () => A.ctx.nets || [], { onPick: n => { const rg = A.ctx.rogue.by[n.bssid]; sel.replaceChildren(h('div', { class: 'row sp' }, h('div', {}, h('b', {}, n.ssid || '(hidden)'), h('div', { class: 'small mute' }, `${n.bssid} | ${n.band} ch ${n.channel} | ${n.level} dBm | ~${Ch.distance(n.level, n.band).toFixed(0)} m`), rg && rg.sev > 0 ? h('div', { class: 'small ' + A.tone(rg.sev >= 3 ? 2 : 1) }, rg.reasons.join('; ')) : null), h('div', { class: 'col' }, h('button', { class: 'sm', onclick: () => A.tools.hunt(n) }, 'Hunt this'), h('button', { class: 'sm ghost', onclick: () => A.meshSheet(n.ssid) }, 'Details')))); } });
+        let trk = null, hist = [], tmr = null; const stopTrk = () => { if (tmr) { clearInterval(tmr); tmr = null; } trk = null; hist = []; radar && radar.focus(null); };
+        A.cleanup(() => { if (tmr) clearInterval(tmr); });
+        const paintTrk = () => { const n = (A.ctx.nets || []).find(x => x.bssid === trk); if (!n) { sel.replaceChildren(h('div', { class: 'small mute' }, 'Not heard in the last scan. Move closer or wait for the next one.'), h('button', { class: 'sm ghost', onclick: () => { stopTrk(); render(); } }, 'Show all')); return; }
+          const dd = hist.length > 2 ? n.level - hist[Math.max(0, hist.length - 4)] : 0, near = cl01((n.level + 95) / 60);
+          sel.replaceChildren(h('div', { class: 'row sp' }, h('div', {}, h('b', {}, n.ssid || '(hidden)'), h('div', { class: 'xs mute' }, `${n.bssid} | ${n.band} ch ${n.channel}`)), h('div', { style: 'text-align:right' }, h('div', { class: 'head', style: 'font-weight:800;font-size:28px' }, n.level + ' dBm'), h('div', { class: 'small' }, `about ${Ch.distance(n.level, n.band).toFixed(1)} m`))),
+            h('div', { class: 'bar', style: 'margin:10px 0 6px' }, h('i', { style: `width:${Math.round(near * 100)}%` })),
+            h('div', { class: 'small ' + (dd > 2 ? 'good' : dd < -2 ? 'bad' : 'warn'), style: 'font-weight:700' }, hist.length < 3 ? 'Walk toward where you think it is, then wait for the next reading' : dd > 2 ? 'Getting warmer: you are closing in' : dd < -2 ? 'Getting colder: turn around' : 'Steady'),
+            h('div', { class: 'xs mute', style: 'margin:6px 0 10px' }, 'The radar zooms in as you get closer. Android only refreshes Wi-Fi scans every few seconds, so walk, pause and watch.'),
+            h('div', { class: 'row wrap' }, h('button', { class: 'sm', onclick: () => A.tools.hunt(n) }, 'Hunt with sound'), h('button', { class: 'sm ghost', onclick: () => { stopTrk(); sel.replaceChildren(h('div', { class: 'small mute' }, 'Tap a blip to select it.')); } }, 'Show all')));
+        };
+        const track = n => { stopTrk(); trk = n.bssid; hist = [n.level]; radar.focus(n.bssid); paintTrk();
+          const poll = async () => { try { const r = await N.call('wifiScan', {}); (r.networks || []).forEach(x => { const o = (A.ctx.nets || []).find(y => y.bssid === x.bssid); if (o) o.level = x.level; }); const c = (A.ctx.nets || []).find(x => x.bssid === trk); if (c) { hist.push(c.level); if (hist.length > 40) hist.shift(); } paintTrk(); } catch (e) {} };
+          if (!web) tmr = setInterval(poll, 3500); };
+        stopRadar(); radar = Ch.radar(cv, () => A.ctx.nets || [], { onPick: n => { const rg = A.ctx.rogue.by[n.bssid]; sel.replaceChildren(h('div', { class: 'row sp' }, h('div', {}, h('b', {}, n.ssid || '(hidden)'), h('div', { class: 'small mute' }, `${n.bssid} | ${n.band} ch ${n.channel} | ${n.level} dBm | ~${Ch.distance(n.level, n.band).toFixed(0)} m`), rg && rg.sev > 0 ? h('div', { class: 'small ' + A.tone(rg.sev >= 3 ? 2 : 1) }, rg.reasons.join('; ')) : null), h('div', { class: 'col' }, h('button', { class: 'sm', onclick: () => track(n) }, 'Track only this'), h('button', { class: 'sm ghost', onclick: () => A.meshSheet(n.ssid) }, 'Details')))); } });
       } else if (sub === 'rogue') {
         const R = A.ctx.rogue, flagged = nets.filter(n => R.by[n.bssid] && R.by[n.bssid].sev > 0).sort((a, b) => R.by[b.bssid].sev - R.by[a.bssid].sev), hidden = nets.filter(n => !n.ssid);
         body.replaceChildren(A.card(`Rogue / suspicious (${R.findings.length})`, R.findings.length ? R.findings.map(f => { const el = A.finding(f); return el; }) : h('div', { class: 'good', style: 'font-weight:600' }, 'Nothing suspicious in this scan.'), h('div', { class: 'small mute', style: 'margin-top:10px' }, 'Checks: look-alike names, your name with no or different security, your name on different hardware, one device broadcasting many names, strong hidden networks, illegal channels, weak security. Heuristics: a flag means "go look", not "proven rogue".')),
@@ -149,8 +171,14 @@
     const adv = A.adv(), known = A.store.get('known', {}), watch = new Set(A.store.get('watch', []));
     let devices = A.ctx.devices || [];
     const scanBtn = h('button', {}, devices.length ? 'Rescan' : 'Scan network'), prog = h('div', { class: 'bar hide', style: 'margin-top:10px' }, h('i', { style: 'width:0' })), sub = h('div', { class: 'small mute' }, 'Sweeps your network. Takes 10-30 s.');
-    const charts = h('div', {}), list = A.card(null);
-    root.append(A.card(null, h('div', { class: 'row sp' }, h('div', {}, h('b', {}, 'Devices on your network'), sub), scanBtn), prog), charts, list);
+    const charts = h('div', {}), list = A.card(null), rcv = h('canvas', { style: 'height:320px' }), rinfo = h('div', { class: 'small mute' }, 'Tap a dot to follow just that device.'), radarCard = A.card('Device radar', rcv, rinfo, h('div', { class: 'xs mute', style: 'margin-top:6px' }, 'Honest note: a phone cannot measure how far a device is. Angle = device type, distance from the centre = how fast it answers (closer = faster). Use it to spot slow or silent devices, not to find them in the room.'));
+    let drad = null, ftmr = null, fip = null; const stopF = () => { if (ftmr) clearInterval(ftmr); ftmr = null; fip = null; drad && drad.focus(null); }; A.cleanup(() => { if (ftmr) clearInterval(ftmr); drad && drad.stop(); });
+    root.append(A.card(null, h('div', { class: 'row sp' }, h('div', {}, h('b', {}, 'Devices on your network'), sub), scanBtn), prog), charts, radarCard, list);
+    const startRadar = () => { if (drad) return; drad = Ch.devRadar(rcv, () => devices.map(d => { d.label = (known[devKey(d)] && known[devKey(d)].label) || d.name || d.vendor || d.ip; return d; }), { color: k => KIND_COL[k] || KIND_COL.unknown,
+      onPick: d => { stopF(); fip = d.ip; drad.focus(d.ip); const hist = [];
+        const show = () => rinfo.replaceChildren(h('div', { class: 'row sp' }, h('div', {}, h('b', {}, d.label), h('div', { class: 'xs mute' }, `${d.ip}${d.mac ? ' | ' + d.mac : ''}`)), h('div', { class: 'head', style: 'font-weight:800;font-size:24px' }, d.rtt > 0 ? C.fmt.ms(d.rtt) : 'no reply')), h('div', { class: 'xs mute', style: 'margin:6px 0' }, hist.length > 2 ? `Last ${hist.length} pings: best ${C.fmt.ms(Math.min(...hist))}, worst ${C.fmt.ms(Math.max(...hist))}` : 'Pinging...'), h('div', { class: 'row wrap' }, h('button', { class: 'sm ghost', onclick: () => { stopF(); rinfo.textContent = 'Tap a dot to follow just that device.'; } }, 'Show all'), h('button', { class: 'sm', onclick: () => detail(d) }, 'Details')));
+        const tick = async () => { try { const r = await N.call('ping', { host: d.ip, count: 1, timeout: 1000 }), v = r.rtts[0]; d.rtt = v; if (v > 0) hist.push(v); } catch (e) { d.rtt = -1; } show(); };
+        show(); tick(); ftmr = setInterval(tick, 1200); } }); };
     const kindOf = d => d.kind || (d.kind = C.guessKind(d.vendor, known[devKey(d)] && known[devKey(d)].label || d.name, d.ports, d.banner));
     function paint() {
       const ip2n = ip => ip.split('.').map(Number).reduce((x, y) => x * 256 + y); devices.sort((a, b) => ip2n(a.ip) - ip2n(b.ip));
@@ -165,7 +193,7 @@
             h('div', { class: 'small mute' }, `${C.KINDS[kind]}${d.vendor ? ' | ' + d.vendor : ''}`), adv ? h('div', { class: 'xs mute' }, `${d.ip}${d.mac ? ' | ' + d.mac : ''}`) : null),
           h('div', { style: 'text-align:right' }, h('div', { class: 'small' }, d.rtt > 0 ? C.fmt.ms(d.rtt) : '-'), d.risk != null ? h('span', { class: 'pill ' + (d.risk >= 40 ? 'bad' : d.risk >= 15 ? 'warn' : 'good') }, d.risk >= 40 ? 'RISK' : d.risk >= 15 ? 'CHECK' : 'OK') : null)); }) : h('div', { class: 'small mute' }, 'No scan yet. Tap Scan network.'));
     }
-    paint();
+    paint(); startRadar();
     scanBtn.onclick = async () => {
       scanBtn.disabled = true; prog.classList.remove('hide'); const seen = []; sub.textContent = 'Scanning...';
       const cb = (d, f) => { seen.push(d); prog.firstChild.style.width = (f * 100) + '%'; devices = seen.slice(); paint(); }, handle = N.on('deviceFound', ev => cb(ev.device, ev.progress || .5));
@@ -208,6 +236,7 @@
   /* ================= HELP ================= */
   A.views.help = function (root) {
     root.append(A.connBar(), A.card('Which version am I using?', h('div', { class: 'small' }, N.live ? `You are using the ${N.isNative ? 'full Android' : 'Windows'} app, so everything is unlocked.` : 'You are using the limited version, which runs from the website (also when added to your home screen). Speed test, outage check, ping test, fix guide and reports work here. Wi-Fi scanning, finding devices, port scan and trace route are only in the full app, which is Android only.'), N.live ? null : h('button', { class: 'sm', style: 'margin-top:10px', onclick: () => A.howSheet() }, 'Show me the differences')));
+    root.append(A.proCard());
     const sel = new Set(A.store.get('symptoms', [])), out = h('div', {});
     root.append(A.card('What is the problem?', h('div', { class: 'small mute', style: 'margin-bottom:10px' }, 'Tap everything that applies. Likely causes are ranked, with the fix and how to confirm it.'),
       h('div', { class: 'chips' }, K.SYMPTOMS.map(([id, label]) => h('span', { class: 'chip' + (sel.has(id) ? ' on' : ''), onclick: e => { const el = e.currentTarget; sel.has(id) ? sel.delete(id) : sel.add(id); el.classList.toggle('on'); A.store.set('symptoms', [...sel]); paint(); } }, label)))), out);

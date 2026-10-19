@@ -156,12 +156,16 @@
   };
 
   /* ================= HOME (easy) ================= */
+  A.proCard = function (why) {
+    return A.card('Need a pro?', h('div', { class: 'small' }, why || 'Still stuck, or want it set up right? AR Consulting Pros does network, Wi-Fi and cable/telecom work in the Central Florida area, and can help remotely too.'),
+      h('div', { class: 'row wrap', style: 'margin-top:10px' }, h('a', { class: 'btn', href: 'https://arcpros.io', target: '_blank', rel: 'noopener', style: 'text-decoration:none;display:inline-flex;align-items:center' }, 'Visit arcpros.io'), h('span', { class: 'xs mute' }, 'AR Consulting Pros LLC')));
+  };
   A.views.home = function (root) {
     const hero = A.card(null), todo = A.card('What to do next'), pings = A.card('Internet connection');
     root.append(A.connBar(), hero);
     root.append(h('div', { class: 'tiles', style: 'margin-bottom:14px' }, A.tile('speed', 'Speed test', 'Speed and lag under load', () => A.go('speed'), ['#3b82f6', '#06b6d4']), A.tile('globe', 'Outage check', 'Is it them or me?', () => A.go('outage'), ['#ef4444', '#f97316']), A.tile('wifi', 'Wi-Fi', N.live ? 'Scan and see channels' : 'Load a scan from your PC', () => A.go('wifi'), ['#8b5cf6', '#ec4899']), A.tile('devices', 'Devices', 'Everything on your network', () => A.go('devices'), ['#10b981', '#14b8a6'], !N.live), A.tile('trace', 'Ping test', 'Latency graph and loss', () => A.tools.ping(), ['#14b8a6', '#0ea5e9']), A.tile('book', 'Fix a problem', 'Pick symptoms, get answers', () => A.go('help'), ['#f59e0b', '#ef4444'])));
     root.append(A.readinessCard()); { const ib = A.installBanner && A.installBanner(); if (ib) root.append(ib); }
-    root.append(todo, pings);
+    root.append(todo, pings, A.proCard());
     async function paint() {
       const wifi = A.ctx.wifi, v = A.verdict(), sp = A.ctx.lastSpeed || A.store.get('speedhist', [])[0];
       const hs = C.healthScore({ verdictSev: v[1], rssi: wifi && wifi.rssi, bloat: sp && sp.bloat, down: sp && sp.down });
@@ -239,7 +243,7 @@
     const cv = h('canvas', { style: 'height:220px' }), phase = h('div', { class: 'small mute', style: 'text-align:center' }, 'Ready'), btn = h('button', { style: 'width:100%;margin-top:12px;min-height:50px;font-size:16px' }, 'Start speed test'), res = h('div', {});
     const spCv = h('canvas', { style: 'height:150px' }), ltCv = h('canvas', { style: 'height:120px' }), spStats = h('div', { class: 'grid', style: 'margin-top:10px' }), chartCard = A.card('Speed over time', spCv, spStats, h('h2', { style: 'margin-top:16px' }, 'Delay during the test'), ltCv, h('div', { class: 'xs mute', style: 'margin-top:4px' }, 'Dashed line = your normal (idle) delay. If the colored line climbs far above it while the speed is running, that is where lag comes from.'));
     root.append(A.card(null, cv, phase, btn), chartCard, res);
-    let ds = [], us = [], dlLen = 8;
+    let ds = [], us = [], dlLen = 9;
     function lineChart(c, lines, o) {
       const dpr = window.devicePixelRatio || 1, w = c.clientWidth, hh = c.clientHeight; if (!w) return; c.width = w * dpr; c.height = hh * dpr;
       const g = c.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, hh);
@@ -255,7 +259,7 @@
     }
     function drawSpeed() {
       lineChart(spCv, [{ pts: ds.map(p => ({ x: p.t, y: p.v })), color: Ch.css('acc') }, { pts: us.map(p => ({ x: dlLen + p.t, y: p.v })), color: Ch.css('good') }], { xmax: dlLen * 2, split: dlLen, min: 10 });
-      const st = arr => { const v = arr.filter(p => p.t > 1.5).map(p => p.v); if (v.length < 4) return null; const avg = v.reduce((a, b) => a + b) / v.length, sd = Math.sqrt(v.reduce((a, b) => a + (b - avg) * (b - avg), 0) / v.length); return { lo: Math.min(...v), avg, hi: Math.max(...v), stab: Math.max(0, Math.min(100, Math.round(100 * (1 - sd / Math.max(avg, 1))))) }; };
+      const st = arr => { const v = arr.filter(p => p.t > 2.5).map(p => p.v); if (v.length < 4) return null; const avg = v.reduce((a, b) => a + b) / v.length, sd = Math.sqrt(v.reduce((a, b) => a + (b - avg) * (b - avg), 0) / v.length); return { lo: Math.min(...v), avg, hi: Math.max(...v), stab: Math.max(0, Math.min(100, Math.round(100 * (1 - sd / Math.max(avg, 1))))) }; };
       const d = st(ds), u = st(us);
       spStats.replaceChildren(d ? [A.st(C.fmt.mbps(d.lo), 'Down lowest'), A.st(C.fmt.mbps(d.avg), 'Down average'), A.st(C.fmt.mbps(d.hi), 'Down peak'), A.st(d.stab + ' / 100', 'Down steadiness')] : null,
         u ? h('div', { class: 'small mute', style: 'grid-column:1/-1' }, `Upload ranged ${C.fmt.mbps(u.lo)} to ${C.fmt.mbps(u.hi)} Mbps (average ${C.fmt.mbps(u.avg)}, steadiness ${u.stab} / 100). Steadiness 100 = perfectly flat line.`) : null);
@@ -264,7 +268,7 @@
       const L = r.samples.lat, d = L.filter(p => p.ph === 'down'), u = L.filter(p => p.ph === 'up');
       lineChart(ltCv, [{ pts: d.map(p => ({ x: p.t, y: p.v })), color: Ch.css('acc') }, { pts: u.map(p => ({ x: dlLen + p.t, y: p.v })), color: Ch.css('good') }], { xmax: dlLen * 2, split: dlLen, min: 50, base: r.idle, noFill: true });
     }
-    drawSpeed(); lineChart(ltCv, [], { xmax: 16, split: 8, min: 50 });
+    drawSpeed(); lineChart(ltCv, [], { xmax: 18, split: 9, min: 50 });
     let cur = 0, shown = 0, label = 'Mbps', max = 100;
     function gauge(v, sub) {
       const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, hh = cv.clientHeight; cv.width = w * dpr; cv.height = hh * dpr;
@@ -280,11 +284,11 @@
     }
     gauge(0, 'Mbps'); let anim;
     function run() {
-      btn.disabled = true; res.replaceChildren(); ds = []; us = []; drawSpeed(); lineChart(ltCv, [], { xmax: 16, split: 8, min: 50 });
-      anim = setInterval(() => { shown += (cur - shown) * 0.25; gauge(shown, label); }, 40); A.cleanup(() => clearInterval(anim));
+      btn.disabled = true; res.replaceChildren(); ds = []; us = []; drawSpeed(); lineChart(ltCv, [], { xmax: 18, split: 9, min: 50 });
+      anim = setInterval(() => { shown += (cur - shown) * 0.18; gauge(shown, label); }, 40); A.cleanup(() => clearInterval(anim));
       Speed.run({
-        phase: p => { phase.textContent = p === 'Latency' ? 'Measuring idle latency...' : p === 'Done' ? 'Complete' : p + '...'; label = p === 'Upload' ? 'Mbps up' : p === 'Download' ? 'Mbps down' : 'Mbps'; cur = 0; shown = 0; },
-        speed: (v, ph) => { cur = v; max = Math.max(100, Math.min(1000, v * 2)); const arr = ph === 'up' ? us : ds; arr.push({ t: (arr.length + 1) * 0.2, v }); drawSpeed(); }, latency: () => {}
+        phase: p => { phase.textContent = p === 'Latency' ? 'Measuring idle latency...' : p === 'Done' ? 'Complete' : p + '...'; label = p === 'Upload' ? 'Mbps up' : p === 'Download' ? 'Mbps down' : 'Mbps'; cur = 0; shown = 0; max = 100; },
+        speed: (v, ph, t) => { cur = v; const steps = [100, 250, 500, 1000, 2000, 5000]; max = Math.max(max, steps.find(x => x >= v * 1.15) || 5000); const arr = ph === 'up' ? us : ds; arr.push({ t: t != null ? t : (arr.length + 1) * 0.25, v }); drawSpeed(); }, latency: () => {}
       }).then(r => { clearInterval(anim); gauge(r.down, 'Mbps down'); phase.textContent = 'Complete'; btn.disabled = false; drawSpeed(); drawLat(r); showResult(r); res.append(A.readinessCard()); const hist = A.store.get('speedhist', []); const { samples, ...slim } = r; hist.unshift(slim); A.store.set('speedhist', hist.slice(0, 30)); A.ctx.lastSpeed = r; })
         .catch(e => { clearInterval(anim); btn.disabled = false; phase.textContent = 'Test failed: ' + (e.message || 'network blocked'); });
     }

@@ -1,7 +1,7 @@
 ext {
     minSdkVersion = 23
     compileSdkVersion = 35
-    targetSdkVersion = 28   // sideloaded build: keeps /proc/net/arp readable for MAC addresses. Set 35 for Play Store (MACs then unavailable)
+    targetSdkVersion = 35   // current target: Play Protect no longer flags the app as old. Trade-off: Android 10+ hides device MAC addresses (ARP table)
     androidxActivityVersion = '1.9.2'
     androidxAppCompatVersion = '1.7.0'
     androidxCoordinatorLayoutVersion = '1.2.0'

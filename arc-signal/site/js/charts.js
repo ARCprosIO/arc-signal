@@ -108,10 +108,9 @@
   /* ---------- radar locator ---------- */
   Ch.distance = (rssi, band) => Math.pow(10, ((band === '6 GHz' ? -52 : band === '5 GHz' ? -47 : -40) - rssi) / 28);   // log-distance, n=2.8 (indoor rough)
   Ch.radar = function (canvas, getNets, o) {
-    o = o || {}; let ang = 0, last = performance.now(), alive = true, hit = [], sel = o.selected || null, pulse = {};
-    const maxD = 60;
+    o = o || {}; let ang = 0, last = performance.now(), alive = true, hit = [], sel = o.selected || null, pulse = {}, fb = null, maxD = 60, maxT = 60;
     function frame(t) {
-      if (!alive || !canvas.isConnected) return; const dt = Math.min(60, t - last); last = t; ang = (ang + dt * 0.0016) % (Math.PI * 2);
+      if (!alive || !canvas.isConnected) return; const dt = Math.min(60, t - last); last = t; maxD += (maxT - maxD) * Math.min(1, dt / 350); ang = (ang + dt * 0.0016) % (Math.PI * 2);
       const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, hh = canvas.clientHeight; if (!w) { requestAnimationFrame(frame); return; }
       if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = hh * dpr; }
       const g = canvas.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, hh);
@@ -121,14 +120,15 @@
       bgG.addColorStop(0, dark ? 'rgba(20,60,90,.55)' : 'rgba(255,255,255,.9)'); bgG.addColorStop(1, dark ? 'rgba(5,15,30,.8)' : 'rgba(200,220,245,.8)');
       g.fillStyle = bgG; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.fill();
       g.strokeStyle = line; g.lineWidth = 1; g.font = '600 10.5px Inter,sans-serif'; g.fillStyle = mute; g.textAlign = 'left';
-      [3, 10, 25, 60].forEach(d => { const r = R * Math.log10(1 + d) / Math.log10(1 + maxD); g.beginPath(); g.arc(cx, cy, r, 0, 7); g.stroke(); g.fillText(d + ' m', cx + 4, cy - r + 11); });
+      (fb ? [maxD / 8, maxD / 4, maxD / 2, maxD] : [3, 10, 25, 60]).forEach(d => { const r = R * Math.log10(1 + d) / Math.log10(1 + maxD); g.beginPath(); g.arc(cx, cy, r, 0, 7); g.stroke(); g.fillText((d < 10 ? d.toFixed(1) : Math.round(d)) + ' m', cx + 4, cy - r + 11); });
       for (let k = 0; k < 8; k++) { g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + R * Math.cos(k * Math.PI / 4), cy + R * Math.sin(k * Math.PI / 4)); g.stroke(); }
       // sweep
       const sg = g.createConicGradient ? g.createConicGradient(ang - 0.9, cx, cy) : null;
       if (sg) { sg.addColorStop(0, 'rgba(0,0,0,0)'); sg.addColorStop(0.14, acc2 + '55'); sg.addColorStop(0.1425, 'rgba(0,0,0,0)'); sg.addColorStop(1, 'rgba(0,0,0,0)'); g.save(); g.beginPath(); g.arc(cx, cy, R, 0, 7); g.clip(); g.fillStyle = sg; g.fillRect(cx - R, cy - R, 2 * R, 2 * R); g.restore(); }
       g.strokeStyle = acc; g.lineWidth = 2; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + R * Math.cos(ang), cy + R * Math.sin(ang)); g.stroke();
       hit = [];
-      getNets().forEach(n => {
+      if (fb) { const f = getNets().find(n => n.bssid === fb); if (f) maxT = cl(Ch.distance(f.level, f.band) * 2.2, 2, 60); }
+      getNets().filter(n => !fb || n.bssid === fb).forEach(n => {
         const d = Ch.distance(n.level, n.band), r = R * cl(Math.log10(1 + d) / Math.log10(1 + maxD), 0.06, 1);
         const base = (hash(n.bssid.split(':').slice(0, 5).join(':')) % 3600) / 3600 * Math.PI * 2, a = base + (n.band === '2.4 GHz' ? 0 : n.band === '5 GHz' ? 0.22 : 0.44);
         const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a), col = Ch.ssidColor(n.ssid);
@@ -148,7 +148,47 @@
     }
     requestAnimationFrame(frame);
     canvas.addEventListener('click', e => { const b = canvas.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top; let best = null, bd = 1e9; hit.forEach(h => { const d = Math.hypot(h.x - x, h.y - y); if (d < h.r && d < bd) { bd = d; best = h.n; } }); if (best && o.onPick) { sel = best.ssid; o.onPick(best); } });
-    return { stop() { alive = false; }, select(s) { sel = s; } };
+    return { stop() { alive = false; }, select(s) { sel = s; }, focus(b) { fb = b || null; if (!fb) maxT = 60; } };
+  };
+
+
+  /* ---------- device radar: sectors = device type, rings = response time (NOT physical distance) ---------- */
+  Ch.devRadar = function (canvas, getDevs, o) {
+    o = o || {}; let ang = 0, last = performance.now(), alive = true, hit = [], fb = null, pulse = {}, maxT = 200, maxV = 200;
+    const KS = ['router', 'phone', 'laptop', 'tv', 'camera', 'printer', 'hub', 'other'], KM = { tablet: 'phone', pc: 'laptop', speaker: 'tv', game: 'tv', nas: 'other', iot: 'hub', unknown: 'other' }, kidx = k => { const i = KS.indexOf(KM[k] || k); return i < 0 ? KS.length - 1 : i; };
+    const rx = ms => Math.log10(1 + Math.max(0.5, ms)) / Math.log10(1 + maxV);
+    function frame(t) {
+      if (!alive || !canvas.isConnected) return; const dt = Math.min(60, t - last); last = t; ang = (ang + dt * 0.0016) % (Math.PI * 2); maxV += (maxT - maxV) * Math.min(1, dt / 350);
+      const dpr = window.devicePixelRatio || 1, w = canvas.clientWidth, hh = canvas.clientHeight; if (!w) { requestAnimationFrame(frame); return; }
+      if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = hh * dpr; }
+      const g = canvas.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, w, hh);
+      const cx = w / 2, cy = hh / 2, R = Math.min(w, hh) / 2 - 14, acc = css('acc'), acc2 = css('acc2'), line = css('glass-line'), tx = css('tx'), mute = css('mute');
+      const bgG = g.createRadialGradient(cx, cy - R * .25, R * .1, cx, cy, R), dark = document.documentElement.style.colorScheme === 'dark';
+      bgG.addColorStop(0, dark ? 'rgba(20,60,90,.55)' : 'rgba(255,255,255,.9)'); bgG.addColorStop(1, dark ? 'rgba(5,15,30,.8)' : 'rgba(200,220,245,.8)');
+      g.fillStyle = bgG; g.beginPath(); g.arc(cx, cy, R, 0, 7); g.fill(); g.strokeStyle = line; g.lineWidth = 1; g.font = '600 10.5px Inter,sans-serif'; g.fillStyle = mute; g.textAlign = 'left';
+      (fb ? [maxV / 8, maxV / 4, maxV / 2, maxV] : [2, 8, 30, 120]).forEach(ms => { const r = R * rx(ms); if (r > R + 1) return; g.beginPath(); g.arc(cx, cy, r, 0, 7); g.stroke(); g.fillText((ms < 10 ? ms.toFixed(1) : Math.round(ms)) + ' ms', cx + 4, cy - r + 11); });
+      for (let k = 0; k < KS.length; k++) { const a = k * Math.PI * 2 / KS.length; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + R * Math.cos(a), cy + R * Math.sin(a)); g.stroke(); }
+      const sg = g.createConicGradient ? g.createConicGradient(ang - 0.9, cx, cy) : null;
+      if (sg) { sg.addColorStop(0, 'rgba(0,0,0,0)'); sg.addColorStop(0.14, acc2 + '55'); sg.addColorStop(0.1425, 'rgba(0,0,0,0)'); sg.addColorStop(1, 'rgba(0,0,0,0)'); g.save(); g.beginPath(); g.arc(cx, cy, R, 0, 7); g.clip(); g.fillStyle = sg; g.fillRect(cx - R, cy - R, 2 * R, 2 * R); g.restore(); }
+      g.strokeStyle = acc; g.lineWidth = 2; g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + R * Math.cos(ang), cy + R * Math.sin(ang)); g.stroke();
+      hit = []; const all = getDevs(); const f = fb && all.find(d => d.ip === fb); if (f && f.rtt > 0) maxT = cl(f.rtt * 2.5, 4, 200);
+      const per = {}; all.forEach(d => { const k = kidx(d.kind); per[k] = (per[k] || 0) + 1; d._i = per[k] - 1; });
+      all.filter(d => !fb || d.ip === fb).forEach(d => {
+        const k = kidx(d.kind), sec = Math.PI * 2 / KS.length, a = k * sec + sec * (0.2 + 0.6 * (((d._i * 0.618) % 1))), r = R * cl(d.rtt > 0 ? rx(d.rtt) : 0.92, 0.07, 1);
+        const x = cx + r * Math.cos(a), y = cy + r * Math.sin(a), col = o.color ? o.color(d.kind) : acc2, size = fb ? 9 : 6;
+        const hs = (((ang - a) % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) < 0.12; if (hs) pulse[d.ip] = 1; pulse[d.ip] = Math.max(0, (pulse[d.ip] || 0) - dt / 1400); const p = pulse[d.ip] || 0;
+        g.fillStyle = col + '33'; g.beginPath(); g.arc(x, y, size + 3 + p * 10, 0, 7); g.fill(); g.fillStyle = col; g.beginPath(); g.arc(x, y, size, 0, 7); g.fill();
+        if (d.rtt > 0 ? 0 : 1) { g.strokeStyle = mute; g.setLineDash([2, 2]); g.beginPath(); g.arc(x, y, size + 3, 0, 7); g.stroke(); g.setLineDash([]); }
+        if (fb || all.length <= 14) { g.fillStyle = tx; g.font = '600 10px Inter,sans-serif'; g.textAlign = 'center'; g.fillText((d.label || d.ip).slice(0, 14), x, y - size - 5); }
+        hit.push({ x, y, r: size + 10, d });
+      });
+      g.fillStyle = acc; g.beginPath(); g.arc(cx, cy, 6, 0, 7); g.fill(); g.strokeStyle = '#fff'; g.lineWidth = 2; g.stroke(); g.fillStyle = tx; g.font = '700 11px Inter,sans-serif'; g.textAlign = 'center'; g.fillText('THIS PHONE', cx, cy + 20);
+      g.font = '700 9.5px Inter,sans-serif'; g.fillStyle = mute; if (!fb) KS.forEach((k, i) => { const a = (i + .5) * Math.PI * 2 / KS.length; g.fillText(k, cx + (R - 16) * Math.cos(a), cy + (R - 16) * Math.sin(a) + 3); });
+      requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+    canvas.addEventListener('click', e => { const b = canvas.getBoundingClientRect(), x = e.clientX - b.left, y = e.clientY - b.top; let best = null, bd = 1e9; hit.forEach(h => { const d = Math.hypot(h.x - x, h.y - y); if (d < h.r && d < bd) { bd = d; best = h.d; } }); if (best && o.onPick) o.onPick(best); });
+    return { stop() { alive = false; }, focus(ip) { fb = ip || null; if (!fb) maxT = 200; } };
   };
 
   /* ---------- RSSI / roam timeline ---------- */

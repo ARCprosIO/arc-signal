@@ -78,7 +78,11 @@
   /* ---------- install panel ---------- */
   const UA = navigator.userAgent, IOS = /iPhone|iPad|iPod/.test(UA) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1), AND = /Android/.test(UA), PC = !IOS && !AND;
   A.installed = () => matchMedia('(display-mode: standalone)').matches || navigator.standalone === true || N.isNative || N.isDesktop;
-  const FILES = [['ARC-Signal.apk', 'Android app (full version)', 'and']];
+  /* Where the Android app is downloaded from. Leave '' to use ARC-Signal.apk next to index.html,
+     or paste a full link (for example a GitHub release link) to download it from somewhere else. */
+  const APK_URL = 'https://github.com/ARCprosIO/arc-signal/releases/download/v1.0/ARC-Signal.apk';
+  const FILES = [[APK_URL || 'ARC-Signal.pk', 'Android app (full version)', 'and']];
+  const checkFile = f => APK_URL ? Promise.resolve({ ok: true }) : fetch(f, { method: 'HEAD', cache: 'no-store' });
   A.installPanel = function (compact) {
     const box = h('div', {}), links = h('div', { class: 'row wrap', style: 'margin-top:10px' }), note = h('div', { class: 'xs mute', style: 'margin-top:8px' });
     const steps = IOS ? ['Open this page in Safari (not inside another app).', 'Tap the Share button (square with an arrow).', 'Scroll and tap Add to Home Screen, then Add.'] :
@@ -88,13 +92,13 @@
     box.append(h('div', { class: 'row', style: 'margin-bottom:8px' }, h('div', { class: 'ic sm', html: Icons.svg(IOS || AND ? 'phone' : 'pc') }), h('b', {}, IOS ? 'iPhone / iPad (limited version)' : AND ? 'Android phone (full app)' : 'Windows / Mac PC (limited version)')), h('ol', { class: 'small', style: 'margin:0 0 6px 18px;padding:0;line-height:1.6' }, steps.map(s => h('li', {}, s))), inst, links, note);
     if (!compact) box.append(h('div', { class: 'xs mute', style: 'margin-top:10px' }, 'Full app: Android only. iPhone and PC use the limited version, which runs from this website.'));
     const want = AND ? 'and' : null;
-    Promise.all(FILES.map(([f, l, k]) => fetch(f, { method: 'HEAD', cache: 'no-store' }).then(r => { if (r.ok) { links.append(h('a', { href: f, download: '', class: 'btn sm' }, 'Download: ' + l)); return k; } return null; }).catch(() => null))).then(r => { if (want && !r.includes(want)) note.textContent = 'Android download: not uploaded to this page yet.'; });
+    Promise.all(FILES.map(([f, l, k]) => checkFile(f).then(r => { if (r.ok) { links.append(h('a', { href: f, download: 'ARC-Signal.apk', class: 'btn sm' }, 'Download: ' + l)); return k; } return null; }).catch(() => null))).then(r => { if (want && !r.includes(want)) note.textContent = 'The Android download is not available yet. Check back soon.'; });
     return box;
   };
 
   /* ---------- clear "you are on the web version" explanations ---------- */
   let dlCache = null;
-  A.findDownloads = () => dlCache || (dlCache = Promise.all(FILES.map(([f, l, k]) => fetch(f, { method: 'HEAD', cache: 'no-store' }).then(r => r.ok ? { f, l, k } : null).catch(() => null))).then(a => a.filter(Boolean)));
+  A.findDownloads = () => dlCache || (dlCache = Promise.all(FILES.map(([f, l, k]) => checkFile(f).then(r => r.ok ? { f, l, k } : null).catch(() => null))).then(a => a.filter(Boolean)));
   const sheetHead = (t, sh) => h('div', { class: 'row sp', style: 'margin-bottom:10px' }, h('b', { class: 'head', style: 'font-size:18px' }, t), h('button', { class: 'sm ghost', onclick: () => sh().close() }, 'Close'));
   A.lockCard = function (what, o) {
     o = o || {}; const box = h('div', { class: 'card banner', style: 'margin:0' }), dl = h('div', { class: 'row wrap', style: 'margin-top:12px' }), near = h('div', { class: 'xs mute', style: 'margin-top:8px' });
@@ -104,8 +108,8 @@
       h('div', { class: 'small', style: 'margin-top:10px' }, h('b', {}, 'What you can do right now:')),
       h('div', { class: 'chips', style: 'margin-top:6px' }, [['Speed test', 'speed'], ['Outage check', 'outage'], ['Fix a problem', 'help']].map(([l, id]) => h('span', { class: 'chip', onclick: () => { document.querySelectorAll('.sheet').forEach(s => s.remove()); A.go(id); } }, l)), h('span', { class: 'chip', onclick: () => { document.querySelectorAll('.sheet').forEach(s => s.remove()); A.tools.ping(); } }, 'Ping test')),
       h('div', { class: 'small', style: 'margin-top:12px' }, h('b', {}, AND ? 'Get the full Android app:' : 'The full app is Android only')), !AND ? h('div', { class: 'small mute' }, (IOS ? 'Apple does not let any app scan Wi-Fi or the local network, so iPhone stays on the limited version.' : 'Browsers on a PC cannot scan Wi-Fi or the local network, so a PC stays on the limited version.') + ' To use this tool, open ARC Signal on an Android phone.') : dl, near);
-    if (AND) A.findDownloads().then(found => { const want = ['and'], hit = found.filter(x => want.includes(x.k)); hit.forEach(x => dl.append(h('a', { href: x.f, download: '', class: 'btn sm' }, 'Download: ' + x.l)));
-      if (!hit.length) near.textContent = 'The app file has not been published to this website yet. Ask the site owner to upload it (steps are in Help, under Owner setup).'; else near.textContent = 'After it downloads, open it. Android will ask to allow installs from this browser: allow it once, then tap Install.'; });
+    if (AND) A.findDownloads().then(found => { const want = ['and'], hit = found.filter(x => want.includes(x.k)); hit.forEach(x => dl.append(h('a', { href: x.f, download: 'ARC-Signal.apk', class: 'btn sm' }, 'Download: ' + x.l)));
+      if (!hit.length) near.textContent = 'The Android app is not available to download yet. Check back soon.'; else near.textContent = 'After it downloads, open it. Android will ask to allow installs from this browser: allow it once, then tap Install.'; });
     return box;
   };
   A.lockSheet = function (what, o) { let sh; sh = A.sheet([sheetHead('Needs the app', () => sh), A.lockCard(what, o)]); return sh; };
@@ -121,6 +125,21 @@
         !on ? h('div', { class: 'find s2', style: 'margin-bottom:12px' }, h('b', {}, 'No internet connection'), h('div', { class: 'why' }, 'Connect to Wi-Fi or turn on mobile data, then try again.')) : null);
     }
     paint(); A.every(4000, paint); try { c().addEventListener && c().addEventListener('change', paint); } catch (e) {} return box;
+  };
+
+  /* what to show when a live Wi-Fi scan fails: say what happened and give the one button that fixes it */
+  A.scanProblem = function (e, retry) {
+    const msg = String((e && e.message) || e || ''), perm = /permission/i.test(msg), box = h('div', { class: 'card banner' });
+    const intent = (action, extra) => 'intent:#Intent;action=' + action + ';' + (extra || '') + 'end';
+    box.append(h('h2', {}, perm ? 'Allow Location so ARC Signal can scan' : 'The scan did not work'),
+      h('div', { class: 'small' }, perm ? 'Android treats Wi-Fi scanning as a location feature, so it will not show nearby networks until Location is allowed. ARC Signal does not store or send your location.' : msg || 'Something went wrong while scanning.'),
+      h('div', { class: 'row wrap', style: 'margin-top:12px' },
+        perm ? h('button', { onclick: async () => { try { await window.Capacitor.Plugins.NetScan.requestPermissions(); } catch (x) {} retry && retry(); } }, 'Allow Location') : null,
+        h('a', { class: 'btn sm ghost', href: intent('android.settings.APPLICATION_DETAILS_SETTINGS', 'data=package:io.arcpros.signal;') }, 'Open app settings'),
+        h('a', { class: 'btn sm ghost', href: intent('android.settings.LOCATION_SOURCE_SETTINGS') }, 'Open Location settings'),
+        h('button', { class: 'sm ghost', onclick: () => retry && retry() }, 'Try again')),
+      h('div', { class: 'xs mute', style: 'margin-top:10px' }, 'Also check: Location is switched on in the quick settings, and the phone is not sharing a hotspot. Android only allows about 4 scans every 2 minutes, so wait a moment if you just scanned.'));
+    return box;
   };
 
   A.installBanner = function () {
